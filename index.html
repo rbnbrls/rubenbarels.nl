@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="nl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Persoonlijke pagina van Ruben Barels - Contactgegevens en interessante links">
+    <title>Ruben Barels</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="weather-clear">
+    <!-- Weather particles container -->
+    <div id="particles"></div>
+
+    <!-- Digital clock -->
+    <div id="clock" class="clock-indicator">
+        <span id="clock-icon">🕐</span>
+        <span id="clock-time">00:00</span>
+    </div>
+
+    <!-- Weather status indicator -->
+    <div id="weather-indicator" class="weather-indicator">
+        <span id="weather-icon">☀️</span>
+        <div class="weather-info">
+            <span id="weather-temp">--°C</span>
+            <span id="weather-location">Locatie laden...</span>
+        </div>
+    </div>
+
+    <main class="container">
+        <!-- Contact Section -->
+        <section class="card contact-card">
+            <h1>Ruben Barels</h1>
+            <p class="subtitle">Welkom op mijn persoonlijke pagina</p>
+
+            <div class="contact-info">
+                <div class="contact-item">
+                    <span class="contact-icon">📧</span>
+                    <a href="mailto:ruben@rubenbarels.nl">ruben@rubenbarels.nl</a>
+                </div>
+                <div class="contact-item">
+                    <span class="contact-icon">🌐</span>
+                    <a href="https://rubenbarels.nl" target="_blank">rubenbarels.nl</a>
+                </div>
+                <div class="contact-item">
+                    <span class="contact-icon">📍</span>
+                    <span>Nederland</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Links Section -->
+        <section class="card links-card">
+            <h2>Interessante Links</h2>
+
+            <div class="links-grid">
+                <a href="https://github.com" target="_blank" class="link-item">
+                    <div class="link-icon">💻</div>
+                    <div class="link-content">
+                        <h3>GitHub</h3>
+                        <p>Het grootste platform voor code hosting en versie beheer. Onmisbaar voor developers.</p>
+                    </div>
+                </a>
+
+                <a href="https://stackoverflow.com" target="_blank" class="link-item">
+                    <div class="link-icon">🔍</div>
+                    <div class="link-content">
+                        <h3>Stack Overflow</h3>
+                        <p>De go-to community voor programmeurs met vragen. Hier vind je antwoord op bijna alles.</p>
+                    </div>
+                </a>
+
+                <a href="https://news.ycombinator.com" target="_blank" class="link-item">
+                    <div class="link-icon">📰</div>
+                    <div class="link-content">
+                        <h3>Hacker News</h3>
+                        <p>Tech nieuws en discussies van Y Combinator. Ideaal om op de hoogte te blijven.</p>
+                    </div>
+                </a>
+
+                <a href="https://developer.mozilla.org" target="_blank" class="link-item">
+                    <div class="link-icon">📚</div>
+                    <div class="link-content">
+                        <h3>MDN Web Docs</h3>
+                        <p>De beste documentatie voor web development. HTML, CSS en JavaScript referentie.</p>
+                    </div>
+                </a>
+
+                <a href="https://css-tricks.com" target="_blank" class="link-item">
+                    <div class="link-icon">🎨</div>
+                    <div class="link-content">
+                        <h3>CSS-Tricks</h3>
+                        <p>Tips, tricks en tutorials voor moderne CSS. Van basics tot geavanceerde technieken.</p>
+                    </div>
+                </a>
+
+                <a href="https://smashingmagazine.com" target="_blank" class="link-item">
+                    <div class="link-icon">✨</div>
+                    <div class="link-content">
+                        <h3>Smashing Magazine</h3>
+                        <p>Web design en development artikelen. Inspiratie en praktische guides.</p>
+                    </div>
+                </a>
+            </div>
+        </section>
+    </main>
+
+    <!-- Location permission prompt -->
+    <div id="location-prompt" class="location-prompt hidden">
+        <div class="prompt-content">
+            <span class="prompt-icon">📍</span>
+            <p>Deel je locatie voor lokaal weer</p>
+            <div class="prompt-buttons">
+                <button id="allow-location" class="btn btn-primary">Toestaan</button>
+                <button id="deny-location" class="btn btn-secondary">Niet nu</button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>© 2026 Ruben Barels</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,645 @@
+/* ===== CSS Variables & Base ===== */
+:root {
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --glass-bg: rgba(255, 255, 255, 0.15);
+    --glass-border: rgba(255, 255, 255, 0.25);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.8);
+    --transition-smooth: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    --border-radius: 20px;
+    --border-radius-sm: 12px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    font-size: 16px;
+}
+
+body {
+    font-family: var(--font-family);
+    min-height: 100vh;
+    color: var(--text-primary);
+    overflow-x: hidden;
+    transition: var(--transition-smooth);
+    position: relative;
+}
+
+/* ===== Weather Background States ===== */
+.weather-clear {
+    background: linear-gradient(135deg, #667eea 0%, #f093fb 50%, #f5576c 100%);
+}
+
+.weather-partly-cloudy {
+    background: linear-gradient(135deg, #89ABE3 0%, #B0C4DE 50%, #A9C9FF 100%);
+}
+
+.weather-cloudy {
+    background: linear-gradient(135deg, #636e72 0%, #b2bec3 50%, #95a5a6 100%);
+}
+
+.weather-fog {
+    background: linear-gradient(135deg, #bdc3c7 0%, #dfe6e9 50%, #ecf0f1 100%);
+}
+
+.weather-fog {
+    --text-primary: #2d3436;
+    --text-secondary: rgba(45, 52, 54, 0.8);
+    --glass-bg: rgba(0, 0, 0, 0.1);
+    --glass-border: rgba(0, 0, 0, 0.15);
+}
+
+.weather-rain {
+    background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+}
+
+.weather-showers {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+}
+
+.weather-snow {
+    background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 50%, #a8c0ff 100%);
+}
+
+.weather-snow {
+    --text-primary: #2d3436;
+    --text-secondary: rgba(45, 52, 54, 0.8);
+    --glass-bg: rgba(0, 0, 0, 0.1);
+    --glass-border: rgba(0, 0, 0, 0.15);
+}
+
+.weather-thunderstorm {
+    background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #2d132c 100%);
+}
+
+/* ===== Particles Container ===== */
+#particles {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+}
+
+/* Rain particles */
+.rain-drop {
+    position: absolute;
+    width: 2px;
+    height: 20px;
+    background: linear-gradient(transparent, rgba(255, 255, 255, 0.6));
+    animation: rain-fall linear infinite;
+}
+
+@keyframes rain-fall {
+    0% {
+        transform: translateY(-100vh);
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    90% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateY(100vh);
+        opacity: 0;
+    }
+}
+
+/* Snow particles */
+.snowflake {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: white;
+    border-radius: 50%;
+    filter: blur(1px);
+    animation: snow-fall linear infinite;
+}
+
+@keyframes snow-fall {
+    0% {
+        transform: translateY(-100vh) rotate(0deg);
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 0.8;
+    }
+
+    90% {
+        opacity: 0.8;
+    }
+
+    100% {
+        transform: translateY(100vh) rotate(360deg);
+        opacity: 0;
+    }
+}
+
+/* Cloud overlay */
+.cloud {
+    position: absolute;
+    width: 200px;
+    height: 80px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 100px;
+    filter: blur(20px);
+    animation: cloud-drift linear infinite;
+}
+
+.cloud::before,
+.cloud::after {
+    content: '';
+    position: absolute;
+    background: inherit;
+    border-radius: 50%;
+}
+
+.cloud::before {
+    width: 100px;
+    height: 100px;
+    top: -40px;
+    left: 30px;
+}
+
+.cloud::after {
+    width: 80px;
+    height: 80px;
+    top: -30px;
+    right: 40px;
+}
+
+@keyframes cloud-drift {
+    0% {
+        transform: translateX(-300px);
+    }
+
+    100% {
+        transform: translateX(calc(100vw + 300px));
+    }
+}
+
+/* Lightning effect */
+.lightning {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: white;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.lightning.flash {
+    animation: lightning-flash 0.2s ease-out;
+}
+
+@keyframes lightning-flash {
+
+    0%,
+    100% {
+        opacity: 0;
+    }
+
+    10%,
+    30% {
+        opacity: 0.8;
+    }
+
+    20%,
+    40% {
+        opacity: 0;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Sun rays for clear weather */
+.sun-rays {
+    position: fixed;
+    top: -100px;
+    right: -100px;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(255, 220, 100, 0.4) 0%, transparent 70%);
+    border-radius: 50%;
+    animation: sun-pulse 4s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes sun-pulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 0.6;
+    }
+
+    50% {
+        transform: scale(1.1);
+        opacity: 0.8;
+    }
+}
+
+/* ===== Clock Indicator ===== */
+.clock-indicator {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 50px;
+    box-shadow: var(--glass-shadow);
+    z-index: 100;
+    transition: var(--transition-smooth);
+}
+
+.clock-indicator:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+#clock-icon {
+    font-size: 1.5rem;
+}
+
+#clock-time {
+    font-weight: 600;
+    font-size: 1.2rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+}
+
+/* ===== Weather Indicator ===== */
+.weather-indicator {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 50px;
+    box-shadow: var(--glass-shadow);
+    z-index: 100;
+    transition: var(--transition-smooth);
+}
+
+.weather-indicator:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+#weather-icon {
+    font-size: 1.5rem;
+}
+
+.weather-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#weather-temp {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+#weather-location {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ===== Main Container ===== */
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 80px 20px 40px;
+    position: relative;
+    z-index: 10;
+}
+
+/* ===== Glass Cards ===== */
+.card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--border-radius);
+    padding: 40px;
+    margin-bottom: 30px;
+    box-shadow: var(--glass-shadow);
+    transition: var(--transition-smooth);
+}
+
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+/* ===== Contact Card ===== */
+.contact-card {
+    text-align: center;
+}
+
+.contact-card h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+}
+
+.contact-info {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+}
+
+.contact-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 50px;
+    transition: var(--transition-smooth);
+}
+
+.contact-item:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+.contact-icon {
+    font-size: 1.2rem;
+}
+
+.contact-item a,
+.contact-item span {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.contact-item a:hover {
+    text-decoration: underline;
+}
+
+/* ===== Links Card ===== */
+.links-card h2 {
+    font-size: 1.8rem;
+    margin-bottom: 30px;
+    text-align: center;
+}
+
+.links-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.link-item {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--border-radius-sm);
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: var(--transition-smooth);
+    border: 1px solid transparent;
+}
+
+.link-item:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--glass-border);
+    transform: translateY(-4px);
+}
+
+.link-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.link-content h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.link-content p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* ===== Location Prompt ===== */
+.location-prompt {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    animation: slide-up 0.5s ease-out;
+}
+
+@keyframes slide-up {
+    from {
+        transform: translateX(-50%) translateY(100px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
+.location-prompt.hidden {
+    display: none;
+}
+
+.prompt-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 24px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 60px;
+    box-shadow: var(--glass-shadow);
+}
+
+.prompt-icon {
+    font-size: 1.5rem;
+}
+
+.prompt-content p {
+    font-weight: 500;
+}
+
+.prompt-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 50px;
+    font-family: var(--font-family);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+
+.btn-primary {
+    background: white;
+    color: #333;
+}
+
+.btn-primary:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(255, 255, 255, 0.3);
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--glass-border);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ===== Footer ===== */
+.footer {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    position: relative;
+    z-index: 10;
+}
+
+/* ===== Responsive Design ===== */
+@media (max-width: 768px) {
+    .container {
+        padding: 100px 16px 30px;
+    }
+
+    .card {
+        padding: 30px 24px;
+    }
+
+    .contact-card h1 {
+        font-size: 2rem;
+    }
+
+    .contact-info {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .weather-indicator {
+        top: 10px;
+        right: 10px;
+        padding: 10px 16px;
+    }
+
+    #weather-icon {
+        font-size: 1.2rem;
+    }
+
+    #weather-temp {
+        font-size: 0.9rem;
+    }
+
+    .location-prompt {
+        left: 16px;
+        right: 16px;
+        transform: none;
+        bottom: 20px;
+    }
+
+    @keyframes slide-up {
+        from {
+            transform: translateY(100px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    .prompt-content {
+        flex-wrap: wrap;
+        justify-content: center;
+        text-align: center;
+        border-radius: var(--border-radius);
+        padding: 20px;
+    }
+
+    .prompt-content p {
+        width: 100%;
+    }
+
+    .links-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .contact-card h1 {
+        font-size: 1.75rem;
+    }
+
+    .link-item {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .link-icon {
+        font-size: 2.5rem;
+    }
+}
