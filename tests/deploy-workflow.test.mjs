@@ -53,6 +53,9 @@ printf '%s' "\${N}" > "\${COUNT_FILE}"
 SPEC="$(awk -v n="\${N}" '{ lines[NR] = $0 } END { print (n > NR ? lines[NR] : lines[n]) }' "\${DIR}/responses")"
 CODE="\${SPEC%%|*}"
 BODY="\${SPEC#*|}"
+# __NL__ stands in for a real newline: the fixtures are line-based, but a
+# multi-line Coolify body is exactly the injection case being tested.
+BODY="\${BODY//__NL__/$'\\n'}"
 
 fail_on_error=0
 out=""
@@ -428,4 +431,41 @@ test('deploy workflow deploys on push to main, can be re-run by hand and is boun
 
 test('deploy workflow targets the rubenbarels.nl Coolify application', () => {
   assert.match(workflow, new RegExp(APP_UUID), 'the workflow must target the rubenbarels.nl Coolify app');
+});
+
+// Kanban t_0838bbdf. GitHub parses a step's stdout for workflow commands, so text
+// that came from Coolify must never reach a log line with its line breaks intact: a
+// body (or a `status` value carrying an escaped \n) whose second line is
+// `::error title=forged::` would otherwise forge an annotation in the run an operator
+// is reading. Fixtures spell a real newline __NL__ (see the curl stub).
+const hostileBody = '{"message":"Bad Gateway"}__NL__::error title=forged::pwned';
+const forgedLines = (output) =>
+  output.split('\n').filter((line) => line.startsWith('::error title=forged'));
+
+test('a multi-line Coolify body cannot forge an annotation from the trigger step', () => {
+  for (const fixture of [`200|${hostileBody}`, `401|${hostileBody}`]) {
+    const { status, output } = runStep(TRIGGER_STEP, { responses: [fixture] });
+    assert.notEqual(status, 0, `${fixture} must fail the step`);
+    assert.deepEqual(forgedLines(output), [], `the body forged a workflow command:\n${output}`);
+
+    const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify '));
+    assert.ok(annotation, `the real annotation must still be emitted:\n${output}`);
+    assert.ok(annotation.includes('Bad Gateway'), 'the annotation must still quote the body');
+    assert.ok(
+      annotation.includes('::error title=forged::pwned'),
+      'the annotation must still quote the body, on one line',
+    );
+  }
+});
+
+test('a status carrying an escaped newline cannot forge a line in the wait step', () => {
+  const { status, output } = waitStep(['200|{"status":"pending\\n::error title=forged::pwned"}'], '2');
+  assert.notEqual(status, 0, 'a deployment that never reaches a terminal status must fail');
+  assert.deepEqual(forgedLines(output), [], `the status forged a workflow command:\n${output}`);
+  assert.match(output, /status pending ::error title=forged::pwned/, 'the status must be logged on one line');
+  assert.match(
+    output,
+    /last status: pending ::error title=forged::pwned/,
+    'the timeout annotation must quote the status on one line',
+  );
 });

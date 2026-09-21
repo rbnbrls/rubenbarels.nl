@@ -98,21 +98,23 @@ jobs:
             ''|*[!0-9]*) HTTP_CODE="000" ;;
           esac
 
-          # One bounded line, for annotations that quote third-party text: GitHub
-          # annotations are line-oriented, so the body must not be able to inject
-          # a workflow command or a forged line into the log.
+          # One bounded line, used by every log line and `::error` annotation that
+          # quotes third-party text: GitHub annotations are line-oriented and the
+          # runner parses a step's stdout for workflow commands, so a body with a
+          # line break could otherwise forge an annotation or a log line (kanban
+          # t_0838bbdf).
           RESPONSE_ONE_LINE="$(printf '%s' "${RESPONSE}" | tr -d '\r' | tr '\n\t' '  ' | cut -c1-500)"
 
           echo "HTTP ${HTTP_CODE}"
-          echo "Response: ${RESPONSE}"
+          echo "Response: ${RESPONSE_ONE_LINE}"
 
           if [ "${HTTP_CODE}" = "000" ]; then
-            echo "::error title=Coolify unreachable::curl got no HTTP status from ${COOLIFY_API_BASE}/deploy (transport error): ${RESPONSE}"
+            echo "::error title=Coolify unreachable::curl got no HTTP status from ${COOLIFY_API_BASE}/deploy (transport error): ${RESPONSE_ONE_LINE}"
             exit 1
           fi
 
           if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
-            echo "::error title=Coolify rejected the deployment::HTTP ${HTTP_CODE} from ${COOLIFY_API_BASE}/deploy: ${RESPONSE} (HTTP 401 'Unauthenticated.' means the COOLIFY_API_TOKEN secret is stale or revoked — rotate it and re-run this workflow.)"
+            echo "::error title=Coolify rejected the deployment::HTTP ${HTTP_CODE} from ${COOLIFY_API_BASE}/deploy: ${RESPONSE_ONE_LINE} (HTTP 401 'Unauthenticated.' means the COOLIFY_API_TOKEN secret is stale or revoked — rotate it and re-run this workflow.)"
             exit 1
           fi
 
@@ -138,7 +140,7 @@ jobs:
           ' 2>/dev/null || true)"
 
           if [ -z "${DEPLOY_UUID}" ]; then
-            echo "::error title=Coolify deployment not queued::Coolify answered HTTP ${HTTP_CODE} without a deployment uuid, so nothing was deployed: ${RESPONSE}"
+            echo "::error title=Coolify deployment not queued::Coolify answered HTTP ${HTTP_CODE} without a deployment uuid, so nothing was deployed: ${RESPONSE_ONE_LINE}"
             exit 1
           fi
 
@@ -220,7 +222,12 @@ jobs:
           sys.stdout.write(status)
           ' 2>/dev/null || true)"
 
-            echo "[${attempt}/${ATTEMPTS}] deployment ${DEPLOYMENT_UUID}: HTTP ${HTTP_CODE} status ${STATUS:-<no status reported>}"
+            # `status` is third-party text too: JSON allows an escaped "\n" inside a
+            # string, and it arrives here as a real line break, so the value used in
+            # the log line below could forge a workflow command (kanban t_0838bbdf).
+            STATUS_ONE_LINE="$(printf '%s' "${STATUS}" | tr -d '\r' | tr '\n\t' '  ' | cut -c1-200)"
+
+            echo "[${attempt}/${ATTEMPTS}] deployment ${DEPLOYMENT_UUID}: HTTP ${HTTP_CODE} status ${STATUS_ONE_LINE:-<no status reported>}"
 
             # A rejected poll never turns into a success by waiting, so report the
             # HTTP code and the body now instead of burning the remaining budget
@@ -256,5 +263,5 @@ jobs:
             fi
           done
 
-          echo "::error title=Coolify deployment not verified::${DEPLOYMENT_UUID} did not reach 'finished' within $((ATTEMPTS * WAIT_SECONDS))s (last status: ${STATUS:-<none>}). It may still be queued behind another build — re-run this workflow once the Coolify queue is clear."
+          echo "::error title=Coolify deployment not verified::${DEPLOYMENT_UUID} did not reach 'finished' within $((ATTEMPTS * WAIT_SECONDS))s (last status: ${STATUS_ONE_LINE:-<none>}). It may still be queued behind another build — re-run this workflow once the Coolify queue is clear."
           exit 1
