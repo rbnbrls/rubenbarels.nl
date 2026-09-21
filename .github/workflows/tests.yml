@@ -1,0 +1,31 @@
+# ── Tests ────────────────────────────────────────────────────────────────────
+#
+# Guards the repository's automation, starting with the deploy workflow's
+# honesty (`.github/workflows/deploy.yml` must go red — not green — when Coolify
+# rejects or fails a deployment). The tests extract the workflow's real `run:`
+# blocks and execute them under bash with a stubbed curl, so they need no
+# dependencies beyond the Node.js runtime that ships with the runner.
+#
+# Run locally with: node --test tests/*.test.mjs
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run deploy workflow guard tests
+        run: node --test tests/*.test.mjs
