@@ -16,9 +16,13 @@
 #   1. Trigger — POST /api/v1/deploy and fail unless the response is 2xx AND
 #                carries a non-empty deployments[0].deployment_uuid.
 #   2. Wait    — poll the deployment record; only `finished` is success, and
-#                `failed`/`error`/`cancelled`/timeout fail the job. A rejected
-#                poll (401/403/404) fails immediately instead of burning the
-#                whole poll window.
+#                `failed`/`error`/`cancelled`/timeout fail the job. Kanban
+#                t_2b136b43: a rejected poll fails *immediately* with the HTTP code
+#                and body — not just 401/403/404, but any non-2xx, a missing status
+#                code (a transport error, normalised to 000), an empty token secret,
+#                and a 2xx body that carries no usable `status`. Before that, those
+#                answers were retried for the whole 60 × 20s window and then
+#                reported as a timeout, which hid the real reason.
 #
 # COOLIFY_API_TOKEN is a Coolify API token with Deploy permission (Coolify →
 # Keys & Tokens → API tokens) stored as a repository secret. It is referenced
@@ -44,18 +48,28 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Worst case poll budget: 60 attempts × 20s sleep = 20 min, plus one curl per
+    # attempt (59 sleeps now that the final attempt no longer sleeps). 30 min
+    # leaves ~10 min of headroom instead of the ~5 min the old 25 min allowed.
+    timeout-minutes: 30
     steps:
       - name: Trigger Coolify deployment
         id: trigger
         env:
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          # Repo variables may override the fleet defaults (kanban t_2b136b43,
+          # item 5). An unset variable expands to "" and the `:-` default in the
+          # run block applies, so this repo keeps its own values until a variable
+          # is deliberately set.
+          COOLIFY_API_BASE: ${{ vars.COOLIFY_API_BASE }}
+          COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
+          COOLIFY_APP_NAME: ${{ vars.COOLIFY_APP_NAME }}
         run: |
           set -euo pipefail
 
-          COOLIFY_API_BASE="https://dev.7rb.nl/api/v1"
-          COOLIFY_APP_UUID="fs3s4diz3zx892uwcjze7hv9"
-          COOLIFY_APP_NAME="rubenbarels.nl"
+          COOLIFY_API_BASE="${COOLIFY_API_BASE:-https://dev.7rb.nl/api/v1}"
+          COOLIFY_APP_UUID="${COOLIFY_APP_UUID:-fs3s4diz3zx892uwcjze7hv9}"
+          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarels.nl}"
 
           if [ -z "${COOLIFY_API_TOKEN:-}" ]; then
             echo "::error title=Coolify API token missing::The COOLIFY_API_TOKEN repository secret is empty or unset, so no deployment can be triggered. Add or rotate it under Settings → Secrets and variables → Actions (Coolify → Keys & Tokens → API tokens)."
@@ -76,10 +90,23 @@ jobs:
           RESPONSE="$(cat "${BODY_FILE}")"
           rm -f "${BODY_FILE}"
 
+          # A transport error makes curl print no status code at all, and anything
+          # non-numeric would make `[ -lt ]` fail with "integer expression expected";
+          # normalising to 000 keeps both an explicit transport error (kanban
+          # t_2b136b43, item 2).
+          case "${HTTP_CODE}" in
+            ''|*[!0-9]*) HTTP_CODE="000" ;;
+          esac
+
+          # One bounded line, for annotations that quote third-party text: GitHub
+          # annotations are line-oriented, so the body must not be able to inject
+          # a workflow command or a forged line into the log.
+          RESPONSE_ONE_LINE="$(printf '%s' "${RESPONSE}" | tr -d '\r' | tr '\n\t' '  ' | cut -c1-500)"
+
           echo "HTTP ${HTTP_CODE}"
           echo "Response: ${RESPONSE}"
 
-          if [ -z "${HTTP_CODE}" ] || [ "${HTTP_CODE}" = "000" ]; then
+          if [ "${HTTP_CODE}" = "000" ]; then
             echo "::error title=Coolify unreachable::curl got no HTTP status from ${COOLIFY_API_BASE}/deploy (transport error): ${RESPONSE}"
             exit 1
           fi
@@ -115,6 +142,17 @@ jobs:
             exit 1
           fi
 
+          # The uuid is published as a step output, so refuse to publish anything
+          # that is not the plain identifier Coolify returns — an unexpected
+          # payload cannot inject a line into $GITHUB_OUTPUT (kanban t_2b136b43,
+          # item 3).
+          case "${DEPLOY_UUID}" in
+            *[!A-Za-z0-9._-]*)
+              echo "::error title=Coolify returned an unexpected deployment uuid::The deployment uuid is not a plain [A-Za-z0-9._-] identifier, so it is not published as a step output: ${RESPONSE_ONE_LINE}"
+              exit 1
+              ;;
+          esac
+
           echo "deployment_uuid=${DEPLOY_UUID}" >> "${GITHUB_OUTPUT}"
           echo "::notice title=Coolify deployment queued::${DEPLOY_UUID}"
 
@@ -124,14 +162,16 @@ jobs:
       - name: Wait for Coolify deployment to finish
         env:
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_API_BASE: ${{ vars.COOLIFY_API_BASE }}
+          COOLIFY_APP_NAME: ${{ vars.COOLIFY_APP_NAME }}
           DEPLOYMENT_UUID: ${{ steps.trigger.outputs.deployment_uuid }}
           DEPLOYMENT_ATTEMPTS: "60"
           DEPLOYMENT_WAIT_SECONDS: "20"
         run: |
           set -euo pipefail
 
-          COOLIFY_API_BASE="https://dev.7rb.nl/api/v1"
-          COOLIFY_APP_NAME="rubenbarels.nl"
+          COOLIFY_API_BASE="${COOLIFY_API_BASE:-https://dev.7rb.nl/api/v1}"
+          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarels.nl}"
           ATTEMPTS="${DEPLOYMENT_ATTEMPTS:-60}"
           WAIT_SECONDS="${DEPLOYMENT_WAIT_SECONDS:-20}"
           DEPLOYMENT_UUID="${DEPLOYMENT_UUID:-}"
@@ -149,31 +189,55 @@ jobs:
           STATUS=""
           for attempt in $(seq 1 "${ATTEMPTS}"); do
             POLL_FILE="$(mktemp)"
-            HTTP_CODE="$(curl -sS -o "${POLL_FILE}" -w '%{http_code}' \
+            # The trigger step's status handling, applied to the poll:
+            # --fail-with-body keeps the error body, -w '%{http_code}' keeps the
+            # code, and `|| true` leaves both for the checks below instead of
+            # aborting the step inside the loop.
+            HTTP_CODE="$(curl -sS --fail-with-body -o "${POLL_FILE}" -w '%{http_code}' \
               -H "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
               "${COOLIFY_API_BASE}/deployments/${DEPLOYMENT_UUID}" || true)"
+            case "${HTTP_CODE}" in
+              ''|*[!0-9]*) HTTP_CODE="000" ;;
+            esac
             BODY="$(cat "${POLL_FILE}" 2>/dev/null || true)"
             rm -f "${POLL_FILE}"
-            STATUS="$(printf '%s' "${BODY}" | python3 -c 'import json,sys
+
+            # One bounded line, so a multi-line third-party body cannot forge a
+            # workflow command in an annotation or bloat the log.
+            BODY_ONE_LINE="$(printf '%s' "${BODY}" | tr -d '\r' | tr '\n\t' '  ' | cut -c1-500)"
+
+            STATUS="$(printf '%s' "${BODY}" | python3 -c '
+          import json, sys
           try:
               payload = json.load(sys.stdin)
           except ValueError:
               sys.exit(1)
-          sys.stdout.write((payload or {}).get("status") or "")' 2>/dev/null || true)"
-            echo "[${attempt}/${ATTEMPTS}] deployment ${DEPLOYMENT_UUID}: HTTP ${HTTP_CODE:-<none>} status ${STATUS:-<no status reported>}"
+          if not isinstance(payload, dict):
+              sys.exit(1)
+          status = payload.get("status") or ""
+          if not isinstance(status, str):
+              sys.exit(1)
+          sys.stdout.write(status)
+          ' 2>/dev/null || true)"
 
-            # A rejected request does not become a success by waiting: report the
-            # actual reason now instead of burning the remaining ~20 minutes.
-            case "${HTTP_CODE}" in
-              401|403)
-                echo "::error title=Coolify API rejected the poll::GET ${COOLIFY_API_BASE}/deployments/${DEPLOYMENT_UUID} answered HTTP ${HTTP_CODE}: ${BODY} — the COOLIFY_API_TOKEN secret is stale or lacks rights; rotate it and re-run this workflow."
-                exit 1
-                ;;
-              404)
-                echo "::error title=Coolify deployment record not found::GET ${COOLIFY_API_BASE}/deployments/${DEPLOYMENT_UUID} answered HTTP 404: ${BODY} — the deployment or its application (${COOLIFY_APP_NAME}) was removed while the build was running."
-                exit 1
-                ;;
-            esac
+            echo "[${attempt}/${ATTEMPTS}] deployment ${DEPLOYMENT_UUID}: HTTP ${HTTP_CODE} status ${STATUS:-<no status reported>}"
+
+            # A rejected poll never turns into a success by waiting, so report the
+            # HTTP code and the body now instead of burning the remaining budget
+            # and failing with a timeout that hides the real reason (a 401 here
+            # means the token died mid-run; a 404 means the record is gone).
+            if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
+              echo "::error title=Coolify API rejected the poll::GET ${COOLIFY_API_BASE}/deployments/${DEPLOYMENT_UUID} answered HTTP ${HTTP_CODE} on attempt ${attempt}/${ATTEMPTS}: ${BODY_ONE_LINE} — HTTP 401 'Unauthenticated.' means the COOLIFY_API_TOKEN secret is stale or revoked (rotate it and re-run this workflow); HTTP 404 means the deployment or its application (${COOLIFY_APP_NAME}) was removed mid-build. kanban t_2b136b43."
+              exit 1
+            fi
+
+            # A 2xx body without a usable status is not a deployment state either:
+            # only `finished` may end this loop green, so an unusable answer is
+            # reported with its body rather than retried for 20 minutes.
+            if [ -z "${STATUS}" ]; then
+              echo "::error title=Coolify poll answer carries no deployment status::GET ${COOLIFY_API_BASE}/deployments/${DEPLOYMENT_UUID} answered HTTP ${HTTP_CODE} with a body that has no usable status field: ${BODY_ONE_LINE}"
+              exit 1
+            fi
 
             case "${STATUS}" in
               finished)
@@ -185,7 +249,11 @@ jobs:
                 exit 1
                 ;;
             esac
-            sleep "${WAIT_SECONDS}"
+
+            # No sleep after the final attempt: the job has nothing left to wait for.
+            if [ "${attempt}" -lt "${ATTEMPTS}" ]; then
+              sleep "${WAIT_SECONDS}"
+            fi
           done
 
           echo "::error title=Coolify deployment not verified::${DEPLOYMENT_UUID} did not reach 'finished' within $((ATTEMPTS * WAIT_SECONDS))s (last status: ${STATUS:-<none>}). It may still be queued behind another build — re-run this workflow once the Coolify queue is clear."
