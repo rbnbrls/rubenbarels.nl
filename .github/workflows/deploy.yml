@@ -1,8 +1,18 @@
 # ── Deploy to Coolify ────────────────────────────────────────────────────────
 #
-# The only automatic path from `main` to production for this repository, so a
-# green run has to mean "Coolify was asked to build a commit, and that build
-# finished".
+# The only automatic path from `main` to a Coolify deployment for this
+# repository, so a green run has to mean "Coolify was asked to build a commit,
+# and that build finished".
+#
+# The target is the `rubenbarelsnl-test` application
+# (`x1fls5ul6lhqz5wnmxuedm2p`, https://rubenbarelsnl.7rb.nl) — the only Coolify
+# application that exists for this repository. The previous target,
+# `fs3s4diz3zx892uwcjze7hv9`, was deleted when the `rubenbarels.nl` Coolify
+# project was recreated on 2026-09-25, so every push to `main` failed with HTTP
+# 404 `{"message":"No resources found."}` (run 36277054593, kanban t_d96484b5).
+# Re-target with the COOLIFY_APP_UUID repository variable when the application
+# moves; the uuid in use is named in every rejection annotation, and
+# `GET ${COOLIFY_API_BASE}/applications` lists the current ones.
 #
 # Before this change that was not true: the trigger step piped `curl -s` into
 # `python3 -c ... || echo "unknown"`, so ANY answer other than a queued
@@ -68,8 +78,14 @@ jobs:
           set -euo pipefail
 
           COOLIFY_API_BASE="${COOLIFY_API_BASE:-https://dev.7rb.nl/api/v1}"
-          COOLIFY_APP_UUID="${COOLIFY_APP_UUID:-fs3s4diz3zx892uwcjze7hv9}"
-          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarels.nl}"
+          # Verified live on 2026-09-26: `x1fls5ul6lhqz5wnmxuedm2p` is the
+          # `rubenbarelsnl-test` application and builds this repository's `main`
+          # (deployment y2jaf3hbwvlavotjbohbub90 finished at commit 3af0fde). Its
+          # predecessor `fs3s4diz3zx892uwcjze7hv9` was deleted when the
+          # `rubenbarels.nl` Coolify project was recreated on 2026-09-25, which is
+          # what failed run 36277054593 with HTTP 404 `No resources found.`
+          COOLIFY_APP_UUID="${COOLIFY_APP_UUID:-x1fls5ul6lhqz5wnmxuedm2p}"
+          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarelsnl-test}"
 
           if [ -z "${COOLIFY_API_TOKEN:-}" ]; then
             echo "::error title=Coolify API token missing::The COOLIFY_API_TOKEN repository secret is empty or unset, so no deployment can be triggered. Add or rotate it under Settings → Secrets and variables → Actions (Coolify → Keys & Tokens → API tokens)."
@@ -114,7 +130,11 @@ jobs:
           fi
 
           if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
-            echo "::error title=Coolify rejected the deployment::HTTP ${HTTP_CODE} from ${COOLIFY_API_BASE}/deploy: ${RESPONSE_ONE_LINE} (HTTP 401 'Unauthenticated.' means the COOLIFY_API_TOKEN secret is stale or revoked — rotate it and re-run this workflow.)"
+            # The app uuid is part of the annotation: the 404 this class produced
+            # (run 36277054593) was a uuid Coolify no longer had, and an
+            # annotation that names only the token sends the reader to the wrong
+            # fix (kanban t_d96484b5).
+            echo "::error title=Coolify rejected the deployment::HTTP ${HTTP_CODE} from ${COOLIFY_API_BASE}/deploy for application ${COOLIFY_APP_UUID}: ${RESPONSE_ONE_LINE} (HTTP 404 'No resources found.' means that application uuid no longer exists — a recreated Coolify project deletes it; list the current ones with GET ${COOLIFY_API_BASE}/applications and set the COOLIFY_APP_UUID repository variable. HTTP 401 'Unauthenticated.' means the COOLIFY_API_TOKEN secret is stale or revoked — rotate it and re-run this workflow.)"
             exit 1
           fi
 

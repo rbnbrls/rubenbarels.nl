@@ -31,11 +31,17 @@ const workflow = readFileSync(workflowPath, 'utf8');
 const TRIGGER_STEP = 'Trigger Coolify deployment';
 const WAIT_STEP = 'Wait for Coolify deployment to finish';
 
-const APP_UUID = 'fs3s4diz3zx892uwcjze7hv9';
+const APP_UUID = 'x1fls5ul6lhqz5wnmxuedm2p';
+// The Coolify application `fs3s4diz3zx892uwcjze7hv9` this workflow used to
+// target was deleted when the `rubenbarels.nl` Coolify project was recreated on
+// 2026-09-25; every push to `main` then failed with HTTP 404
+// `{"message":"No resources found."}` (run 36277054593). It must not come back.
+const DELETED_APP_UUID = 'fs3s4diz3zx892uwcjze7hv9';
 const FAKE_TOKEN = 'fake-coolify-token-value-1234567890';
 const UNAUTHENTICATED = '{"message":"Unauthenticated."}';
+const NO_RESOURCES = '{"message":"No resources found."}';
 const QUEUED =
-  '{"deployments":[{"message":"Application rubenbarels.nl deployment queued.",' +
+  '{"deployments":[{"message":"Application rubenbarelsnl-test deployment queued.",' +
   `"resource_uuid":"${APP_UUID}","deployment_uuid":"2koexlt0snkfsw5nnxbzz2ly"}]}`;
 const QUEUED_UUID = '2koexlt0snkfsw5nnxbzz2ly';
 
@@ -220,11 +226,35 @@ test('trigger step fails on a non-JSON body', () => {
 });
 
 test('trigger step fails on transport errors and non-2xx responses', () => {
-  for (const fixture of ['000|', '500|{"message":"Server Error"}', '404|{"message":"No resources found."}']) {
+  for (const fixture of ['000|', '500|{"message":"Server Error"}', `404|${NO_RESOURCES}`]) {
     const { status, output } = runStep(TRIGGER_STEP, { responses: [fixture] });
     assert.notEqual(status, 0, `${fixture} must fail the step, got exit ${status}\n${output}`);
     assert.match(output, /::error/);
   }
+});
+
+test('a rejected trigger names the app uuid so a deleted Coolify resource is diagnosable', () => {
+  // The failure this guards (run 36277054593): the workflow posted to an
+  // application uuid Coolify no longer had and the annotation only talked about
+  // a stale token, so the real cause — a uuid that does not exist any more — had
+  // to be looked up by hand.
+  const { status, output } = runStep(TRIGGER_STEP, { responses: [`404|${NO_RESOURCES}`] });
+  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
+  assert.match(output, /::error/);
+  assert.ok(output.includes(APP_UUID), `the annotation must name the app uuid it targeted\n${output}`);
+  assert.match(output, /No resources found/, 'the annotation must quote the body');
+  assert.match(output, /no longer exists/i, 'the annotation must name the dead-uuid cause');
+});
+
+test('a rejected trigger names the app uuid actually used, not a default', () => {
+  const overridden = 'overridden-app-uuid';
+  const { status, output } = runStep(TRIGGER_STEP, {
+    responses: [`404|${NO_RESOURCES}`],
+    env: { COOLIFY_APP_UUID: overridden },
+  });
+  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
+  assert.ok(output.includes(overridden), `the annotation must name the effective uuid\n${output}`);
+  assert.ok(!output.includes(APP_UUID), `the annotation must not name the unused default\n${output}`);
 });
 
 test('trigger step fails with an actionable message when the token secret is unset', () => {
@@ -429,8 +459,23 @@ test('deploy workflow deploys on push to main, can be re-run by hand and is boun
   assert.match(workflow, /timeout-minutes:\s*\d+/, 'the job must be bounded by a timeout');
 });
 
-test('deploy workflow targets the rubenbarels.nl Coolify application', () => {
-  assert.match(workflow, new RegExp(APP_UUID), 'the workflow must target the rubenbarels.nl Coolify app');
+test('deploy workflow targets the live rubenbarels.nl Coolify application', () => {
+  // The baked-in default is the target when no COOLIFY_APP_UUID repository
+  // variable is set, so it has to be the application that exists (kanban
+  // t_d96484b5).
+  assert.match(
+    workflow,
+    new RegExp(`COOLIFY_APP_UUID="\\$\\{COOLIFY_APP_UUID:-${APP_UUID}\\}"`),
+    'the workflow must default to the live Coolify app for this repository',
+  );
+});
+
+test('the deleted Coolify application is not the baked-in target any more', () => {
+  assert.doesNotMatch(
+    workflow,
+    new RegExp(`COOLIFY_APP_UUID:-${DELETED_APP_UUID}`),
+    'the deleted app uuid made every push to main fail with HTTP 404 No resources found.',
+  );
 });
 
 // Kanban t_0838bbdf. GitHub parses a step's stdout for workflow commands, so text
