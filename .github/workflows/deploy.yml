@@ -193,7 +193,11 @@ jobs:
           set -euo pipefail
 
           COOLIFY_API_BASE="${COOLIFY_API_BASE:-https://dev.7rb.nl/api/v1}"
-          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarels.nl}"
+          # The same default as the trigger step: this name is quoted in the
+          # rejected-poll and `deployment failed` annotations below, so naming a
+          # different application than the one that was deployed misdirects the
+          # operator (kanban t_d96484b5).
+          COOLIFY_APP_NAME="${COOLIFY_APP_NAME:-rubenbarelsnl-test}"
           ATTEMPTS="${DEPLOYMENT_ATTEMPTS:-60}"
           WAIT_SECONDS="${DEPLOYMENT_WAIT_SECONDS:-20}"
           DEPLOYMENT_UUID="${DEPLOYMENT_UUID:-}"

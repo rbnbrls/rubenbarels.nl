@@ -32,6 +32,11 @@ const TRIGGER_STEP = 'Trigger Coolify deployment';
 const WAIT_STEP = 'Wait for Coolify deployment to finish';
 
 const APP_UUID = 'x1fls5ul6lhqz5wnmxuedm2p';
+// The application the workflow deploys. Every annotation that names an
+// application has to name this one — a message that quotes a different app
+// sends the reader to the wrong place (the wait step used to say
+// `rubenbarels.nl` while the trigger step deployed `rubenbarelsnl-test`).
+const APP_NAME = 'rubenbarelsnl-test';
 // The Coolify application `fs3s4diz3zx892uwcjze7hv9` this workflow used to
 // target was deleted when the `rubenbarels.nl` Coolify project was recreated on
 // 2026-09-25; every push to `main` then failed with HTTP 404
@@ -476,6 +481,30 @@ test('the deleted Coolify application is not the baked-in target any more', () =
     new RegExp(`COOLIFY_APP_UUID:-${DELETED_APP_UUID}`),
     'the deleted app uuid made every push to main fail with HTTP 404 No resources found.',
   );
+});
+
+test('both steps default the application name to the application they deploy', () => {
+  // The name reaches operator-facing text in both steps (the trigger's log line,
+  // the wait step's rejected-poll and `deployment failed` annotations), so two
+  // different defaults mean one of them names an application this workflow does
+  // not touch.
+  const defaults = [...workflow.matchAll(/COOLIFY_APP_NAME="\$\{COOLIFY_APP_NAME:-([^}]+)\}"/g)].map(
+    (match) => match[1],
+  );
+  assert.equal(defaults.length, 2, `both steps must declare a COOLIFY_APP_NAME default, found ${defaults.length}`);
+  assert.deepEqual(
+    [...new Set(defaults)],
+    [APP_NAME],
+    `both steps must name the deployed application, got ${defaults.join(', ')}`,
+  );
+});
+
+test('the wait step names the deployed application when a poll is rejected', () => {
+  const { status, output, curlCalls } = waitStep([`404|${NO_RESOURCES}`]);
+  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
+  assert.match(output, /::error/);
+  assert.equal(curlCalls.length, 1, 'a rejected poll must stop the loop');
+  assert.ok(output.includes(APP_NAME), `the annotation must name the deployed application\n${output}`);
 });
 
 // Kanban t_0838bbdf. GitHub parses a step's stdout for workflow commands, so text
