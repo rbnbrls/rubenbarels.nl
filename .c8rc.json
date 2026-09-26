@@ -1,0 +1,9 @@
+{
+  "reporter": ["text", "lcovonly"],
+  "report-dir": "coverage",
+  "include": ["**/*.js"],
+  "exclude": ["coverage/**", "node_modules/**", "tests/**"],
+  "check-coverage": true,
+  "all": true,
+  "lines": 90
+}
