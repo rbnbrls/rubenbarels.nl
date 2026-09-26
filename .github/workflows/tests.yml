@@ -2,11 +2,16 @@
 #
 # Guards the repository's automation, starting with the deploy workflow's
 # honesty (`.github/workflows/deploy.yml` must go red — not green — when Coolify
-# rejects or fails a deployment). The tests extract the workflow's real `run:`
-# blocks and execute them under bash with a stubbed curl, so they need no
+# rejects or fails a deployment). Those guard tests extract the workflow's real
+# `run:` blocks and execute them under bash with a stubbed curl, so they need no
 # dependencies beyond the Node.js runtime that ships with the runner.
 #
-# Run locally with: node --test tests/*.test.mjs
+# The suite also contains `tests/script.test.mjs`, which boots the real
+# `index.html` in jsdom and therefore needs the devDependencies — hence the
+# install step below. Lint, the type check and the coverage floor live in
+# `.github/workflows/ci.yml`.
+#
+# Run locally with: npm test
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Tests
@@ -27,5 +32,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Run deploy workflow guard tests
-        run: node --test tests/*.test.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.1'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the test suite
+        run: npm test

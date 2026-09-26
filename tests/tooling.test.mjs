@@ -125,6 +125,22 @@ test('the committed lcov report is real and meets the floor', () => {
   );
 });
 
+test('every workflow that runs the suite installs the devDependencies first', () => {
+  // `tests/script.test.mjs` boots the page in jsdom, so a workflow that runs the
+  // suite on a bare runner fails on a missing module — exactly how this workflow
+  // went red on the pull request that added the suite.
+  for (const file of ['ci.yml', 'tests.yml']) {
+    const workflowFile = read(`.github/workflows/${file}`);
+    if (!/npm (test|run coverage)/.test(workflowFile)) continue;
+    assert.match(workflowFile, /run: npm ci/, `${file} runs the suite without installing its dependencies`);
+  }
+  assert.match(
+    read('.github/workflows/tests.yml'),
+    /run: npm test/,
+    'the Tests workflow must run the same command a developer runs locally',
+  );
+});
+
 test('coverage output is ignored except the committed report', () => {
   const ignored = spawnSync('git', ['check-ignore', '--quiet', 'coverage/lcov.info'], { cwd: root });
   assert.notEqual(ignored.status, 0, 'coverage/lcov.info must be committable — it is our durable evidence');
