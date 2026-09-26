@@ -29,8 +29,9 @@ npm test          # alleen de tests, zonder dekkingsmeting
 
 ## CI
 
-`.github/workflows/ci.yml` draait op elke pull request: `npm ci`, `eslint`, `tsc
+`.github/workflows/tests.yml` draait op elke pull request: `npm ci`, `eslint`, `tsc
 --noEmit`, de coverage-run met ondergrens en de actualiteitscontrole op het
-meegeleverde lcov-rapport. Node is vastgezet op de patchversie waarmee
-`coverage/lcov.info` is gemaakt, zodat de cijfers reproduceerbaar blijven.
-`.github/workflows/deploy.yml` deployt `main` naar Coolify.
+meegeleverde lcov-rapport. De guard-tests voor `deploy.yml` zitten in dezelfde
+suite. Node is vastgezet op de patchversie waarmee `coverage/lcov.info` is
+gemaakt, zodat de cijfers reproduceerbaar blijven. `.github/workflows/deploy.yml`
+deployt `main` naar Coolify.

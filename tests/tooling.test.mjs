@@ -8,9 +8,9 @@
 // reproducible:
 //
 //   * `.c8rc.json` is the single source of the line floor;
-//   * `.github/workflows/ci.yml` runs the suite *through* c8 (`npm run coverage`),
-//     prints the line total, enforces that floor, runs eslint and `tsc --noEmit`,
-//     and refuses a stale committed report;
+//   * `.github/workflows/tests.yml` runs the suite *through* c8
+//     (`npm run coverage`), prints the line total, enforces that floor, runs
+//     eslint and `tsc --noEmit`, and refuses a stale committed report;
 //   * `coverage/lcov.info` is committed, so the published percentage is readable
 //     from the default branch instead of living in a CI log that expires.
 //
@@ -18,7 +18,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -30,7 +30,7 @@ const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
 const c8Config = JSON.parse(read('.c8rc.json'));
 const packageJson = JSON.parse(read('package.json'));
 const tsconfig = JSON.parse(read('tsconfig.json'));
-const workflow = read('.github/workflows/ci.yml');
+const workflow = read('.github/workflows/tests.yml');
 const eslintConfig = read('eslint.config.mjs');
 const lcov = read('coverage/lcov.info');
 
@@ -90,13 +90,22 @@ test('CI gates a pull request on lint, the type check and the coverage runner', 
   assert.match(workflow, /node-version: '22\.23\.1'/, 'the Node patch that generated the committed report must be pinned');
 });
 
+test('the deploy guards still run in the gate that covers the page', () => {
+  // They moved into the dependency-installing job when `script.test.mjs` needed
+  // jsdom; narrowing that job to its own file would silently drop the guards.
+  assert.ok(read('tests/deploy-workflow.test.mjs').includes('deploy.yml'), 'the deploy guards must exist');
+  assert.match(workflow, /npm run coverage/, 'the gate must run the whole suite, guards included');
+  assert.equal(packageJson.scripts.coverage, 'c8 npm test');
+  assert.match(packageJson.scripts.test, /tests\/\*\.test\.mjs/, 'the suite must still glob every test file');
+});
+
 test('the coverage floor the workflow declares is the floor c8 enforces', () => {
   const declared = workflow.match(/COVERAGE_FAIL_UNDER: (\d{1,3})/);
   assert.ok(declared, 'the workflow must declare the coverage floor it expects');
   assert.equal(
     Number(declared[1]),
     c8Config.lines,
-    'COVERAGE_FAIL_UNDER in .github/workflows/ci.yml and "lines" in .c8rc.json drifted apart',
+    'COVERAGE_FAIL_UNDER in .github/workflows/tests.yml and "lines" in .c8rc.json drifted apart',
   );
 });
 
@@ -127,17 +136,24 @@ test('the committed lcov report is real and meets the floor', () => {
 
 test('every workflow that runs the suite installs the devDependencies first', () => {
   // `tests/script.test.mjs` boots the page in jsdom, so a workflow that runs the
-  // suite on a bare runner fails on a missing module — exactly how this workflow
-  // went red on the pull request that added the suite.
-  for (const file of ['ci.yml', 'tests.yml']) {
-    const workflowFile = read(`.github/workflows/${file}`);
+  // suite on a bare runner fails on a missing module — exactly how the guard
+  // workflow went red on the pull request that added the suite.
+  const directories = ['.github/workflows'];
+  const workflows = directories.flatMap((directory) =>
+    readdirSync(path.join(root, directory))
+      .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+      .map((name) => `${directory}/${name}`),
+  );
+  assert.ok(workflows.length > 0, 'the repository must keep its workflows');
+  for (const file of workflows) {
+    const workflowFile = read(file);
     if (!/npm (test|run coverage)/.test(workflowFile)) continue;
     assert.match(workflowFile, /run: npm ci/, `${file} runs the suite without installing its dependencies`);
   }
   assert.match(
     read('.github/workflows/tests.yml'),
-    /run: npm test/,
-    'the Tests workflow must run the same command a developer runs locally',
+    /npm run coverage/,
+    'the gate must run the suite through the coverage runner',
   );
 });
 

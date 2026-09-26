@@ -1,37 +1,67 @@
-# ── Tests ────────────────────────────────────────────────────────────────────
+# ── CI ───────────────────────────────────────────────────────────────────────
 #
-# Guards the repository's automation, starting with the deploy workflow's
-# honesty (`.github/workflows/deploy.yml` must go red — not green — when Coolify
-# rejects or fails a deployment). Those guard tests extract the workflow's real
-# `run:` blocks and execute them under bash with a stubbed curl, so they need no
-# dependencies beyond the Node.js runtime that ships with the runner.
+# The repository's gate: `npm ci`, eslint, `tsc --noEmit` and the unit suite run
+# *through* c8, which prints the line total and fails below the floor in
+# `.c8rc.json`.
 #
-# The suite also contains `tests/script.test.mjs`, which boots the real
-# `index.html` in jsdom and therefore needs the devDependencies — hence the
-# install step below. Lint, the type check and the coverage floor live in
-# `.github/workflows/ci.yml`.
+# This file began as the deploy-guard workflow (its guards execute the real
+# `run:` blocks of `deploy.yml` under bash with a stubbed curl, so they once
+# needed no dependencies at all). The darkfactory quality lane measured the
+# default branch as:
 #
-# Run locally with: npm test
+#   coverage rung `unmeasured` — `capability:coverage_tooling_absent`
+#   quality tools configured: none — enforced in CI: none
+#
+# Both findings are closed here:
+#
+#   1. Coverage. `npm run coverage` (c8, a devDependency) runs the suite, prints
+#      the line total, fails below the floor in `.c8rc.json` and writes
+#      `coverage/lcov.info`. That report is committed: a CI log line expires,
+#      while a committed report stays readable from `main` and gives the lane a
+#      real percentage instead of "unavailable".
+#   2. Static tooling. eslint (flat config) and `tsc --noEmit` (strict,
+#      `checkJs` over `script.js`) now gate a merge.
+#
+# The guards keep running — in this same suite, now that `tests/script.test.mjs`
+# boots the page in jsdom and the job therefore has to install the
+# devDependencies anyway. A separate dependency-free guard job went red on the
+# pull request that added that test, and a check that fails on its own missing
+# devDependency no longer says anything about the code.
+#
+# The workflow keeps its original path and its existing permission block on
+# purpose: this change then moves no token permission at all, which is the
+# question the lane's security change class exists to put to a human.
+#
+# The workflow is covered by `tests/tooling.test.mjs`, which asserts the steps
+# below and that the floor declared here still equals `.c8rc.json`.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Tests
+name: CI
 
 on:
+  pull_request:
   push:
     branches: [ main ]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  workflow-guards:
+  ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # Exactly 22.23.1: it is the patch release the committed `coverage/lcov.info`
+      # was generated with. A different V8 would shift the per-line counters and
+      # fail the "report is current" gate below without anything having regressed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22.23.1'
@@ -40,5 +70,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run the test suite
-        run: npm test
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Type check (tsc)
+        run: npm run typecheck
+
+      - name: Coverage (line total + floor from .c8rc.json)
+        # The floor lives in `.c8rc.json` (single source of truth for the local
+        # `npm run coverage` too); this variable mirrors it so that changing the
+        # ratchet is an explicit, reviewable edit in two places, and so a drift
+        # fails here loudly instead of silently weakening the gate.
+        env:
+          COVERAGE_FAIL_UNDER: 90
+        run: |
+          set -euo pipefail
+          floor="$(node -p "require('./.c8rc.json').lines")"
+          if [ "$floor" != "$COVERAGE_FAIL_UNDER" ]; then
+            echo "::error::coverage floor drift: .c8rc.json says ${floor}, workflow says ${COVERAGE_FAIL_UNDER}"
+            exit 1
+          fi
+          npm run coverage
+
+      - name: coverage/lcov.info must be committed and current
+        run: git diff --exit-code -- coverage/lcov.info
