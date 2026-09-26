@@ -1,0 +1,9 @@
+node_modules/
+
+.env
+
+# Coverage output of `npm run coverage`. coverage/lcov.info is the durable
+# evidence (a CI log line expires, a committed report does not) and is committed;
+# the regenerable rest is not.
+coverage/*
+!coverage/lcov.info

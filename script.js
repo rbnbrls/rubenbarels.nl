@@ -4,7 +4,15 @@
  * Uses ip-api.com for IP-based geolocation fallback
  */
 
+/**
+ * @typedef {object} Weather
+ * @property {string} type  Weather family used for the background class (`weather-<type>`).
+ * @property {string} icon  Emoji shown in the weather indicator.
+ * @property {string} description Human-readable Dutch description (tooltip).
+ */
+
 // WMO Weather interpretation codes mapping
+/** @type {Record<number, Weather>} */
 const WEATHER_CODES = {
     0: { type: 'clear', icon: '☀️', description: 'Helder' },
     1: { type: 'partly-cloudy', icon: '🌤️', description: 'Licht bewolkt' },
@@ -38,18 +46,20 @@ const WEATHER_CODES = {
 
 // State
 let currentWeatherType = 'clear';
+/** @type {ReturnType<typeof setInterval> | null} */
 let particleInterval = null;
+/** @type {ReturnType<typeof setInterval> | null} */
 let lightningInterval = null;
 
 // DOM Elements
 const body = document.body;
-const particlesContainer = document.getElementById('particles');
-const weatherIcon = document.getElementById('weather-icon');
-const weatherTemp = document.getElementById('weather-temp');
-const weatherLocation = document.getElementById('weather-location');
-const locationPrompt = document.getElementById('location-prompt');
-const allowLocationBtn = document.getElementById('allow-location');
-const denyLocationBtn = document.getElementById('deny-location');
+/** @type {HTMLElement} */ const particlesContainer = /** @type {HTMLElement} */ (document.getElementById('particles'));
+/** @type {HTMLElement} */ const weatherIcon = /** @type {HTMLElement} */ (document.getElementById('weather-icon'));
+/** @type {HTMLElement} */ const weatherTemp = /** @type {HTMLElement} */ (document.getElementById('weather-temp'));
+/** @type {HTMLElement} */ const weatherLocation = /** @type {HTMLElement} */ (document.getElementById('weather-location'));
+/** @type {HTMLElement} */ const locationPrompt = /** @type {HTMLElement} */ (document.getElementById('location-prompt'));
+/** @type {HTMLElement} */ const allowLocationBtn = /** @type {HTMLElement} */ (document.getElementById('allow-location'));
+/** @type {HTMLElement} */ const denyLocationBtn = /** @type {HTMLElement} */ (document.getElementById('deny-location'));
 
 /**
  * Initialize the weather system
@@ -163,6 +173,8 @@ async function useIPGeolocation() {
 
 /**
  * Reverse geocode coordinates to get city name
+ * @param {number} lat
+ * @param {number} lon
  */
 async function reverseGeocode(lat, lon) {
     try {
@@ -173,7 +185,7 @@ async function reverseGeocode(lat, lon) {
         if (data.status === 'success') {
             weatherLocation.textContent = data.city || data.regionName || 'Nederland';
         }
-    } catch (error) {
+    } catch {
         console.log('Reverse geocode failed, using coordinates');
         weatherLocation.textContent = `${lat.toFixed(1)}°, ${lon.toFixed(1)}°`;
     }
@@ -181,6 +193,8 @@ async function reverseGeocode(lat, lon) {
 
 /**
  * Fetch weather data from Open-Meteo API
+ * @param {number} lat
+ * @param {number} lon
  */
 async function fetchWeather(lat, lon) {
     try {
@@ -206,6 +220,8 @@ async function fetchWeather(lat, lon) {
 
 /**
  * Update the weather indicator display
+ * @param {number} temp
+ * @param {number} code
  */
 function updateWeatherDisplay(temp, code) {
     const weather = WEATHER_CODES[code] || WEATHER_CODES[0];
@@ -217,6 +233,7 @@ function updateWeatherDisplay(temp, code) {
 
 /**
  * Update background based on weather code
+ * @param {number} code
  */
 function updateBackground(code) {
     const weather = WEATHER_CODES[code] || WEATHER_CODES[0];
@@ -237,6 +254,7 @@ function updateBackground(code) {
 
 /**
  * Update particle effects based on weather type
+ * @param {string} weatherType
  */
 function updateParticles(weatherType) {
     // Clear existing particles
@@ -285,6 +303,7 @@ function createSunRays() {
 
 /**
  * Create cloud effects
+ * @param {number} count
  */
 function createClouds(count) {
     for (let i = 0; i < count; i++) {
@@ -293,7 +312,7 @@ function createClouds(count) {
         cloud.style.top = `${Math.random() * 40}%`;
         cloud.style.animationDuration = `${30 + Math.random() * 30}s`;
         cloud.style.animationDelay = `${-Math.random() * 30}s`;
-        cloud.style.opacity = 0.3 + Math.random() * 0.4;
+        cloud.style.opacity = String(0.3 + Math.random() * 0.4);
         particlesContainer.appendChild(cloud);
     }
 }
@@ -310,13 +329,14 @@ function createFog() {
         fog.style.height = '150px';
         fog.style.animationDuration = `${60 + Math.random() * 40}s`;
         fog.style.animationDelay = `${-Math.random() * 60}s`;
-        fog.style.opacity = 0.5;
+        fog.style.opacity = '0.5';
         particlesContainer.appendChild(fog);
     }
 }
 
 /**
  * Create rain effect
+ * @param {number} intensity
  */
 function createRain(intensity) {
     function addRainDrops() {
@@ -339,6 +359,7 @@ function createRain(intensity) {
 
 /**
  * Create snow effect
+ * @param {number} intensity
  */
 function createSnow(intensity) {
     function addSnowflakes() {
@@ -386,8 +407,8 @@ function createLightning() {
  * Initialize and update the digital clock
  */
 function initClock() {
-    const clockTime = document.getElementById('clock-time');
-    const clockIcon = document.getElementById('clock-icon');
+    const clockTime = /** @type {HTMLElement} */ (document.getElementById('clock-time'));
+    const clockIcon = /** @type {HTMLElement} */ (document.getElementById('clock-icon'));
 
     function updateClock() {
         const now = new Date();
