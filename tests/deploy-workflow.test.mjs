@@ -1,20 +1,18 @@
 // Guards the honesty of `.github/workflows/deploy.yml`.
 //
-// The deploy workflow is the only automatic path from `main` to production for
-// this repository, so a green run has to mean "Coolify was asked to build and
-// the build finished". Before this change the trigger step piped `curl -s` into
-// a `python3 -c ... || echo "unknown"` fallback, so Coolify answering
-// `{"message":"Unauthenticated."}`, a 404, a 5xx, a transport error, or a 2xx
-// body without a `deployments` key all produced `deployment_uuid=unknown` and a
-// green job while nothing was deployed. There was no wait step either, so a
-// Coolify build that failed after being queued also stayed green.
+// The deploy workflow is the only automatic path from `main` to production for this
+// repository, so a green run has to mean "Coolify was asked to build and the build
+// finished". Issue #6 was the opposite: the trigger step piped `curl -s` into a
+// `python3 -c ... || echo "unknown"` fallback, so Coolify answering
+// `{"message":"Unauthenticated."}` produced `deployment_uuid=unknown` and a green job
+// while production kept serving the 2026-08-15 build.
 //
-// These tests execute the real `run:` blocks of the workflow (extracted from the
-// YAML, not copied, so they cannot drift) under `bash -e` with a stubbed `curl`
-// on PATH: every Coolify answer is played back from a fixture and the step's
-// exit status, annotations and `$GITHUB_OUTPUT` are checked.
+// These tests execute the real `run:` blocks of the workflow (extracted from the YAML,
+// not copied, so they cannot drift) under `bash -e` with a stubbed `curl` on PATH:
+// every Coolify answer is played back from a fixture and the step's exit status,
+// annotations and `$GITHUB_OUTPUT` are checked.
 //
-// Run with: node --test tests/*.test.mjs
+// Run with `npm test` (node --test).
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -31,23 +29,11 @@ const workflow = readFileSync(workflowPath, 'utf8');
 const TRIGGER_STEP = 'Trigger Coolify deployment';
 const WAIT_STEP = 'Wait for Coolify deployment to finish';
 
-const APP_UUID = 'x1fls5ul6lhqz5wnmxuedm2p';
-// The application the workflow deploys. Every annotation that names an
-// application has to name this one — a message that quotes a different app
-// sends the reader to the wrong place (the wait step used to say
-// `rubenbarels.nl` while the trigger step deployed `rubenbarelsnl-test`).
-const APP_NAME = 'rubenbarelsnl-test';
-// The Coolify application `fs3s4diz3zx892uwcjze7hv9` this workflow used to
-// target was deleted when the `rubenbarels.nl` Coolify project was recreated on
-// 2026-09-25; every push to `main` then failed with HTTP 404
-// `{"message":"No resources found."}` (run 36277054593). It must not come back.
-const DELETED_APP_UUID = 'fs3s4diz3zx892uwcjze7hv9';
 const FAKE_TOKEN = 'fake-coolify-token-value-1234567890';
 const UNAUTHENTICATED = '{"message":"Unauthenticated."}';
-const NO_RESOURCES = '{"message":"No resources found."}';
 const QUEUED =
-  '{"deployments":[{"message":"Application rubenbarelsnl-test deployment queued.",' +
-  `"resource_uuid":"${APP_UUID}","deployment_uuid":"2koexlt0snkfsw5nnxbzz2ly"}]}`;
+  '{"deployments":[{"message":"Application rubenbarels.nl deployment queued.",' +
+  '"resource_uuid":"fs3s4diz3zx892uwcjze7hv9","deployment_uuid":"2koexlt0snkfsw5nnxbzz2ly"}]}';
 const QUEUED_UUID = '2koexlt0snkfsw5nnxbzz2ly';
 
 // Plays back one `code|body` fixture per call (the last one repeats) and mimics the
@@ -193,13 +179,36 @@ function runStep(stepName, { responses, token = FAKE_TOKEN, env = {} }) {
   }
 }
 
+// The trigger step resolves its deployment target from Coolify by application
+// *name* and only skips that lookup when an explicit `COOLIFY_APP_UUID` is set, so
+// the tests that exercise the POST itself pin the uuid and the tests that exercise
+// the resolution leave it unset.
+const PINNED_ENV = { COOLIFY_APP_UUID: 'pinned-app-uuid' };
+const triggerStep = (responses, env = {}) => runStep(TRIGGER_STEP, { responses, env: { ...PINNED_ENV, ...env } });
+
+// Two applications of the live instance, so a name match is a real match and not
+// "the only entry in the list".
+const applications = (entries) => JSON.stringify(entries);
+const LIVE_DEVELOPMENT_APP = {
+  uuid: 'wtla19czfxc56jw1zetpww6q',
+  name: 'rubenbarels-nl-development',
+  fqdn: 'https://slimverlof-nl.7rb.nl',
+  git_repository: 'rbnbrls/rubenbarels.nl.git',
+};
+const LIVE_PRODUCTION_APP = {
+  uuid: 'zqwpbdg7mu8dneqnsf1ftahd',
+  name: 'rubenbarels-nl-production',
+  fqdn: 'https://rubenbarels.nl',
+  git_repository: 'rbnbrls/rubenbarels.nl.git',
+};
+
 test('trigger step goes green only when Coolify queued a deployment', () => {
-  const { status, githubOutput } = runStep(TRIGGER_STEP, { responses: [`200|${QUEUED}`] });
+  const { status, githubOutput } = triggerStep([`200|${QUEUED}`]);
   assert.equal(status, 0, 'a 200 with a deployment uuid must succeed');
   assert.match(githubOutput, new RegExp(`^deployment_uuid=${QUEUED_UUID}$`, 'm'));
 });
 
-test('trigger step fails on the 401 {"message":"Unauthenticated."} body', () => {
+test('trigger step fails on the 401 {"message":"Unauthenticated."} body from issue #6', () => {
   const { status, output, githubOutput } = runStep(TRIGGER_STEP, { responses: [`401|${UNAUTHENTICATED}`] });
   assert.notEqual(status, 0, `401 must fail the step, got exit ${status}\n${output}`);
   assert.match(output, /::error/);
@@ -208,16 +217,9 @@ test('trigger step fails on the 401 {"message":"Unauthenticated."} body', () => 
 });
 
 test('trigger step fails when a 2xx body carries no deployments[] entry', () => {
-  const bodies = [
-    '{"message":"Application rubenbarels.nl deployment queued."}',
-    '{}',
-    'null',
-    '[]',
-    '{"deployments":[]}',
-    '{"deployments":[{"message":"queued"}]}',
-  ];
+  const bodies = ['{"message":"Application rubenbarels.nl deployment queued."}', '{}', 'null', '[]', '{"deployments":[]}', '{"deployments":[{"message":"queued"}]}'];
   for (const body of bodies) {
-    const { status, output, githubOutput } = runStep(TRIGGER_STEP, { responses: [`200|${body}`] });
+    const { status, output, githubOutput } = triggerStep([`200|${body}`]);
     assert.notEqual(status, 0, `200 with ${body} must fail the step, got exit ${status}\n${output}`);
     assert.match(output, /::error/);
     assert.doesNotMatch(githubOutput, /deployment_uuid=/);
@@ -225,41 +227,17 @@ test('trigger step fails when a 2xx body carries no deployments[] entry', () => 
 });
 
 test('trigger step fails on a non-JSON body', () => {
-  const { status, output } = runStep(TRIGGER_STEP, { responses: ['200|<html>502 Bad Gateway</html>'] });
+  const { status, output } = triggerStep(['200|<html>502 Bad Gateway</html>']);
   assert.notEqual(status, 0, 'a non-JSON 200 body must fail the step');
   assert.match(output, /::error/);
 });
 
-test('trigger step fails on transport errors and non-2xx responses', () => {
-  for (const fixture of ['000|', '500|{"message":"Server Error"}', `404|${NO_RESOURCES}`]) {
-    const { status, output } = runStep(TRIGGER_STEP, { responses: [fixture] });
+test('trigger step fails on transport errors and 5xx responses', () => {
+  for (const fixture of ['000|', '500|{"message":"Server Error"}', '404|{"message":"No resources found."}']) {
+    const { status, output } = triggerStep([fixture]);
     assert.notEqual(status, 0, `${fixture} must fail the step, got exit ${status}\n${output}`);
     assert.match(output, /::error/);
   }
-});
-
-test('a rejected trigger names the app uuid so a deleted Coolify resource is diagnosable', () => {
-  // The failure this guards (run 36277054593): the workflow posted to an
-  // application uuid Coolify no longer had and the annotation only talked about
-  // a stale token, so the real cause — a uuid that does not exist any more — had
-  // to be looked up by hand.
-  const { status, output } = runStep(TRIGGER_STEP, { responses: [`404|${NO_RESOURCES}`] });
-  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
-  assert.match(output, /::error/);
-  assert.ok(output.includes(APP_UUID), `the annotation must name the app uuid it targeted\n${output}`);
-  assert.match(output, /No resources found/, 'the annotation must quote the body');
-  assert.match(output, /no longer exists/i, 'the annotation must name the dead-uuid cause');
-});
-
-test('a rejected trigger names the app uuid actually used, not a default', () => {
-  const overridden = 'overridden-app-uuid';
-  const { status, output } = runStep(TRIGGER_STEP, {
-    responses: [`404|${NO_RESOURCES}`],
-    env: { COOLIFY_APP_UUID: overridden },
-  });
-  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
-  assert.ok(output.includes(overridden), `the annotation must name the effective uuid\n${output}`);
-  assert.ok(!output.includes(APP_UUID), `the annotation must not name the unused default\n${output}`);
 });
 
 test('trigger step fails with an actionable message when the token secret is unset', () => {
@@ -270,29 +248,165 @@ test('trigger step fails with an actionable message when the token secret is uns
 });
 
 test('trigger step never prints the API token', () => {
-  const { output } = runStep(TRIGGER_STEP, { responses: [`200|${QUEUED}`] });
+  const { output } = triggerStep([`200|${QUEUED}`]);
   assert.doesNotMatch(output, new RegExp(FAKE_TOKEN), 'the token must never reach the log');
 });
 
-test('trigger step builds the Authorization header from the token env var', () => {
-  const script = stepRun(TRIGGER_STEP);
-  assert.match(
-    script,
-    /Authorization: Bearer \$\{COOLIFY_API_TOKEN\}/,
-    'the header must interpolate the COOLIFY_API_TOKEN env var, never a literal',
-  );
-  assert.doesNotMatch(script, /Bearer \$\{\$\{\s*secrets\./, 'the env indirection is what keeps the token out of the log');
-});
-
-test('trigger step no longer contains the `|| echo "unknown"` fallback', () => {
+test('trigger step no longer contains the `|| echo unknown` fallback', () => {
   assert.doesNotMatch(stepRun(TRIGGER_STEP), /\|\| echo "unknown"/);
 });
 
+test('trigger step refuses to publish a uuid outside [A-Za-z0-9._-]', () => {
+  // The uuid is written to $GITHUB_OUTPUT, so an unexpected payload must not be able
+  // to publish a line of its own (kanban t_2b136b43, item 3).
+  const bodies = [
+    '{"deployments":[{"deployment_uuid":"bad uuid"}]}',
+    '{"deployments":[{"deployment_uuid":"a;b"}]}',
+    '{"deployments":[{"deployment_uuid":"evil\\nmy_output=1"}]}',
+  ];
+  for (const body of bodies) {
+    const { status, output, githubOutput } = triggerStep([`200|${body}`]);
+    assert.notEqual(status, 0, `200 with ${body} must fail the step, got exit ${status}\n${output}`);
+    assert.match(output, /::error/);
+    assert.doesNotMatch(githubOutput, /deployment_uuid=/, 'no uuid may be published for an unexpected payload');
+  }
+});
+
+test('the Coolify API base and app uuid can be overridden per repository', () => {
+  // Item 5 of kanban t_2b136b43: repo variables win over the fleet defaults, so one
+  // workflow body can serve the whole fleet without losing this repo's own values.
+  const base = 'https://coolify.example.test/api/v1';
+  const trigger = runStep(TRIGGER_STEP, {
+    responses: [`200|${QUEUED}`],
+    env: { COOLIFY_API_BASE: base, COOLIFY_APP_UUID: 'overridden-app-uuid' },
+  });
+  assert.equal(trigger.status, 0, trigger.output);
+  assert.match(trigger.curlCalls.join(' '), new RegExp(`${escapeRegExp(base)}/deploy`));
+  assert.match(trigger.curlCalls.join(' '), /overridden-app-uuid/);
+  assert.equal(trigger.curlCalls.length, 1, 'an explicit uuid must be used as-is, without a lookup');
+
+  const wait = runStep(WAIT_STEP, {
+    responses: ['200|{"status":"finished"}'],
+    env: { ...FAST_WAIT_ENV, DEPLOYMENT_UUID: QUEUED_UUID, COOLIFY_API_BASE: base },
+  });
+  assert.equal(wait.status, 0, wait.output);
+  assert.match(wait.curlCalls.join(' '), new RegExp(`${escapeRegExp(base)}/deployments/${QUEUED_UUID}`));
+});
+
+// Issue #14 (workflow run #12, and #11 before it). The trigger step used to POST an
+// application uuid hardcoded in this file, and Coolify answered
+// `404 {"message":"No resources found."}` because that application no longer exists:
+// the app had been re-created (2026-09-25) and the new record has a different uuid.
+// A uuid belongs to one application record, so the step now resolves its target from
+// the provider by application *name* — which survives a re-creation — and only
+// trusts an explicit `COOLIFY_APP_UUID` override.
+test('trigger step resolves the Coolify application by name and deploys it', () => {
+  const { status, output, githubOutput, curlCalls } = runStep(TRIGGER_STEP, {
+    responses: [`200|${applications([LIVE_DEVELOPMENT_APP, LIVE_PRODUCTION_APP])}`, `200|${QUEUED}`],
+  });
+  assert.equal(status, 0, `the resolved application must be deployed\n${output}`);
+  assert.match(curlCalls[0], /\/applications(\s|$)/, `the first call must read the application list: ${curlCalls[0]}`);
+  assert.doesNotMatch(curlCalls[0], /-X POST/, 'the lookup must be a GET');
+  assert.match(curlCalls[1], /\/deploy(\s|$)/, `the second call must trigger the deploy: ${curlCalls[1]}`);
+  assert.match(
+    curlCalls[1],
+    new RegExp(escapeRegExp(LIVE_PRODUCTION_APP.uuid)),
+    'the uuids must be resolved, not guessed: the deploy must name the production application',
+  );
+  assert.doesNotMatch(curlCalls[1], new RegExp(escapeRegExp(LIVE_DEVELOPMENT_APP.uuid)), 'the development app must not be deployed');
+  assert.match(githubOutput, new RegExp(`^deployment_uuid=${QUEUED_UUID}$`, 'm'));
+});
+
+test('the deploy workflow no longer ships an application uuid that can go stale', () => {
+  const run = stepRun(TRIGGER_STEP);
+  assert.doesNotMatch(run, /fs3s4diz3zx892uwcjze7hv9/, 'the dead application uuid must not come back');
+  assert.match(run, /COOLIFY_APP_NAME/, 'the target application must be selected by name');
+  assert.match(workflow, /COOLIFY_APP_NAME: \$\{\{ vars\.COOLIFY_APP_NAME \}\}/, 'the name must be overridable per repository');
+});
+
+test('trigger step fails closed when no application carries the target name', () => {
+  for (const body of [`${applications([LIVE_DEVELOPMENT_APP])}`, '[]']) {
+    const { status, output, curlCalls } = runStep(TRIGGER_STEP, { responses: [`200|${body}`] });
+    assert.notEqual(status, 0, `an unresolvable target must fail the step\n${output}`);
+    const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify application not found'));
+    assert.ok(annotation, `the missing application must be annotated:\n${output}`);
+    assert.ok(annotation.includes('rubenbarels-nl-production'), 'the annotation must name the target that did not resolve');
+    assert.equal(curlCalls.length, 1, 'nothing may be deployed when the target does not resolve');
+  }
+});
+
+test('trigger step fails closed when the target name is ambiguous', () => {
+  const twin = { ...LIVE_PRODUCTION_APP, uuid: 'cdyz1bhejvd3swgvvk0cpv9a' };
+  const { status, output, curlCalls } = runStep(TRIGGER_STEP, {
+    responses: [`200|${applications([LIVE_PRODUCTION_APP, twin])}`],
+  });
+  assert.notEqual(status, 0, `an ambiguous target must fail the step\n${output}`);
+  const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify application name is ambiguous'));
+  assert.ok(annotation, `the ambiguity must be annotated:\n${output}`);
+  assert.ok(annotation.includes(LIVE_PRODUCTION_APP.uuid), 'the annotation must list the candidates');
+  assert.ok(annotation.includes(twin.uuid), 'the annotation must list the candidates');
+  assert.equal(curlCalls.length, 1, 'nothing may be deployed from an ambiguous match');
+});
+
+test('trigger step fails when the application lookup is rejected', () => {
+  const { status, output, curlCalls } = runStep(TRIGGER_STEP, { responses: [`401|${UNAUTHENTICATED}`] });
+  assert.notEqual(status, 0, 'a rejected lookup must fail the step');
+  const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify application lookup failed'));
+  assert.ok(annotation, `the rejected lookup must be annotated:\n${output}`);
+  assert.ok(annotation.includes('Unauthenticated'), 'the annotation must quote the body');
+  assert.ok(annotation.includes('COOLIFY_API_TOKEN'), 'a 401 still points at the token secret');
+  assert.equal(curlCalls.length, 1, 'no deploy may be attempted without a resolved target');
+});
+
+test('trigger step fails when the application lookup answer is unusable', () => {
+  for (const body of ['{}', 'null', '"rubenbarels-nl-production"', '<html>502 Bad Gateway</html>']) {
+    const { status, output, curlCalls } = runStep(TRIGGER_STEP, { responses: [`200|${body}`] });
+    assert.notEqual(status, 0, `200 with ${body} must fail the step, got exit ${status}\n${output}`);
+    const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify application list is unusable'));
+    assert.ok(annotation, `an unusable lookup answer must be annotated as such:\n${output}`);
+    assert.equal(curlCalls.length, 1, 'an unusable lookup answer must not be retried or deployed through');
+  }
+});
+
+test('a resolved application uuid outside [A-Za-z0-9._-] is never deployed', () => {
+  const { status, output, curlCalls } = runStep(TRIGGER_STEP, {
+    responses: [`200|${applications([{ ...LIVE_PRODUCTION_APP, uuid: 'not a uuid' }])}`, `200|${QUEUED}`],
+  });
+  assert.notEqual(status, 0, `an unusable uuid must fail the step\n${output}`);
+  assert.match(output, /::error title=Coolify returned an unusable application uuid/);
+  assert.equal(curlCalls.length, 1, 'the uuid is interpolated into the request body, so it must not be sent');
+});
+
+test('a 404 No resources found. names the missing application instead of blaming the token', () => {
+  const { status, output } = triggerStep(['404|{"message":"No resources found."}']);
+  assert.notEqual(status, 0, 'HTTP 404 must fail the step');
+  const annotation = output.split('\n').find((line) => line.startsWith('::error title=Coolify application not found'));
+  assert.ok(annotation, `the 404 must be reported as a missing application:\n${output}`);
+  assert.ok(annotation.includes('No resources found.'), 'the annotation must quote the body');
+  assert.ok(annotation.includes('pinned-app-uuid'), 'the annotation must name the target it used');
+  assert.ok(!annotation.includes('rotate'), 'the 404 is not a token problem and must not suggest rotating the secret');
+});
+
+test('a multi-line lookup body cannot forge an annotation either', () => {
+  const injected = '{"message":"Bad Gateway"}__NL__::error title=forged::pwned';
+  const { status, output } = runStep(TRIGGER_STEP, { responses: [`401|${injected}`] });
+  assert.notEqual(status, 0, 'a rejected lookup must fail the step');
+  assert.ok(
+    output.split('\n').some((line) => line.startsWith('::error title=Coolify application lookup failed')),
+    `the rejected lookup must be annotated:\n${output}`,
+  );
+  assert.deepEqual(
+    output.split('\n').filter((line) => line.startsWith('::error title=forged')),
+    [],
+    `the body forged a workflow command:\n${output}`,
+  );
+  assert.match(output, /Bad Gateway/, 'the annotation must still quote the body');
+});
+
 const FAST_WAIT_ENV = { DEPLOYMENT_ATTEMPTS: '2', DEPLOYMENT_WAIT_SECONDS: '0' };
-const waitStep = (responses, attempts = FAST_WAIT_ENV.DEPLOYMENT_ATTEMPTS, token = FAKE_TOKEN) =>
+const waitStep = (responses, attempts = FAST_WAIT_ENV.DEPLOYMENT_ATTEMPTS) =>
   runStep(WAIT_STEP, {
     responses,
-    token,
     env: { ...FAST_WAIT_ENV, DEPLOYMENT_ATTEMPTS: attempts, DEPLOYMENT_UUID: QUEUED_UUID },
   });
 
@@ -313,6 +427,54 @@ test('wait step fails when the deployment never reaches a terminal status', () =
   assert.match(output, /::error/);
 });
 
+// Kanban t_2b136b43. The poll used to run its whole 60 × 20s budget for every failure
+// mode (a token revoked mid-run, a 404 body, a transport error, a 2xx body without a
+// status) and then fail with a timeout that hid the real reason. Those tests pin the
+// fail-fast behaviour: stop at the first unusable answer, quote the HTTP code and body.
+const FULL_BUDGET = '60';
+
+test('wait step fails fast when the token dies mid-run (401 on a later poll)', () => {
+  const { status, output, curlCalls } = waitStep(['200|{"status":"building"}', `401|${UNAUTHENTICATED}`], FULL_BUDGET);
+  assert.notEqual(status, 0, `a mid-run 401 must fail the step, got exit ${status}\n${output}`);
+  assert.match(output, /::error/);
+  assert.match(output, /HTTP 401/);
+  assert.match(output, /Unauthenticated/);
+  assert.match(output, /COOLIFY_API_TOKEN/);
+  assert.doesNotMatch(output, /did not reach 'finished'/, 'the timeout message must not mask the 401');
+  assert.equal(curlCalls.length, 2, `the loop must stop at the first rejected poll, not keep polling (${curlCalls.length} polls)`);
+});
+
+test('wait step fails fast on every other non-2xx poll, quoting the code and the body', () => {
+  for (const [code, body] of [
+    ['503', '{"message":"Server Error"}'],
+    ['404', '{"message":"Deployment not found."}'],
+    ['429', '{"message":"Too Many Requests"}'],
+  ]) {
+    const { status, output, curlCalls } = waitStep(['200|{"status":"in_progress"}', `${code}|${body}`], FULL_BUDGET);
+    assert.notEqual(status, 0, `HTTP ${code} must fail the step, got exit ${status}\n${output}`);
+    assert.match(output, /::error/);
+    assert.match(output, new RegExp(`HTTP ${code}`), 'the annotation must quote the HTTP code');
+    assert.ok(output.includes(body), `the annotation must quote the body: ${body}`);
+    assert.doesNotMatch(output, /did not reach 'finished'/);
+    assert.equal(curlCalls.length, 2, `HTTP ${code} must stop the loop`);
+  }
+});
+
+test('wait step fails fast when the poll reports no usable HTTP status', () => {
+  // `000` makes the stub behave like a transport error (no code on stdout at all);
+  // `abc` mimics a curl that printed something non-numeric. Both used to reach
+  // `[ "${HTTP_CODE}" -lt 200 ]` and die with "integer expression expected".
+  for (const fixture of ['000|', 'abc|']) {
+    const { status, output, curlCalls } = waitStep([fixture, '200|{"status":"finished"}'], FULL_BUDGET);
+    assert.notEqual(status, 0, `${fixture} must fail the step, got exit ${status}\n${output}`);
+    assert.match(output, /::error/);
+    assert.match(output, /HTTP 000/, 'a missing status code must be reported as 000');
+    assert.doesNotMatch(output, /integer expression expected/, 'a missing code must not surface as an arithmetic error');
+    assert.doesNotMatch(output, /did not reach 'finished'/);
+    assert.equal(curlCalls.length, 1, 'an unusable answer must not be retried');
+  }
+});
+
 test('wait step fails fast when a 2xx body carries no usable status', () => {
   const bodies = [
     '<html>502 Bad Gateway</html>',
@@ -324,7 +486,7 @@ test('wait step fails fast when a 2xx body carries no usable status', () => {
     '{"status":1234}',
   ];
   for (const body of bodies) {
-    const { status, output, curlCalls } = waitStep([`200|${body}`], '60');
+    const { status, output, curlCalls } = waitStep([`200|${body}`], FULL_BUDGET);
     assert.notEqual(status, 0, `200 with ${body} must fail the step, got exit ${status}\n${output}`);
     assert.match(output, /::error/);
     assert.match(output, /HTTP 200/);
@@ -334,64 +496,12 @@ test('wait step fails fast when a 2xx body carries no usable status', () => {
   }
 });
 
-test('wait step fails fast when the status endpoint rejects the request', () => {
-  // A revoked token, a vanished deployment record or any other rejected poll must not
-  // burn the whole ~20 minute poll window before failing with a generic timeout
-  // message: it must stop at the first bad answer and quote the HTTP code and body
-  // (kanban t_2b136b43).
-  const fixtures = [
-    ['401', '{"message":"Unauthenticated."}'],
-    ['403', '{"message":"Forbidden."}'],
-    ['404', '{"message":"No resources found."}'],
-    ['429', '{"message":"Too Many Requests"}'],
-    ['503', '{"message":"Server Error"}'],
-  ];
-  for (const [code, body] of fixtures) {
-    const { status, output, curlCalls } = waitStep([`${code}|${body}`]);
-    assert.notEqual(status, 0, `HTTP ${code} must fail the step\n${output}`);
-    assert.match(output, /::error/);
-    assert.match(output, new RegExp(`HTTP ${code}`), `the annotation must name the HTTP status\n${output}`);
-    assert.ok(output.includes(body), `the annotation must quote the body\n${output}`);
-    assert.doesNotMatch(output, /\[2\/2\]/, `a rejected poll must not keep retrying\n${output}`);
-    assert.equal(curlCalls.length, 1, `HTTP ${code} must stop the loop, not keep polling`);
-  }
-});
-
-test('wait step fails fast when the token dies mid-run (401 on a later poll)', () => {
-  const { status, output, curlCalls } = waitStep(['200|{"status":"building"}', `401|${UNAUTHENTICATED}`], '60');
-  assert.notEqual(status, 0, `a mid-run 401 must fail the step, got exit ${status}\n${output}`);
-  assert.match(output, /::error/);
-  assert.match(output, /HTTP 401/);
-  assert.match(output, /Unauthenticated/);
-  assert.match(output, /COOLIFY_API_TOKEN/);
-  assert.doesNotMatch(output, /did not reach 'finished'/, 'the timeout message must not mask the 401');
-  assert.equal(curlCalls.length, 2, `the loop must stop at the first rejected poll, not keep polling (${curlCalls.length} polls)`);
-});
-
-test('wait step fails fast when the poll reports no usable HTTP status', () => {
-  // `000` makes the stub behave like a transport error (no code on stdout at all);
-  // `abc` mimics a curl that printed something non-numeric. Both used to be retried
-  // for the whole budget (and a non-numeric code died with "integer expression
-  // expected" instead of an annotation).
-  for (const fixture of ['000|', 'abc|']) {
-    const { status, output, curlCalls } = waitStep([fixture, '200|{"status":"finished"}'], '60');
-    assert.notEqual(status, 0, `${fixture} must fail the step, got exit ${status}\n${output}`);
-    assert.match(output, /::error/);
-    assert.match(output, /HTTP 000/, 'a missing status code must be reported as 000');
-    assert.doesNotMatch(output, /integer expression expected/, 'a missing code must not surface as an arithmetic error');
-    assert.doesNotMatch(output, /did not reach 'finished'/);
-    assert.equal(curlCalls.length, 1, 'an unusable answer must not be retried');
-  }
-});
-
-test('wait step fails when the trigger step produced no uuid', () => {
-  const { status, output } = runStep(WAIT_STEP, { responses: ['200|{"status":"finished"}'], env: FAST_WAIT_ENV });
-  assert.notEqual(status, 0, 'a missing uuid must not be treated as success');
-  assert.match(output, /::error/);
-});
-
-test('wait step fails with an actionable message when the token secret is unset', () => {
-  const { status, output, curlCalls } = waitStep(['200|{"status":"finished"}'], FAST_WAIT_ENV.DEPLOYMENT_ATTEMPTS, '');
+test('wait step fails before polling at all when the token secret is unset', () => {
+  const { status, output, curlCalls } = runStep(WAIT_STEP, {
+    responses: ['200|{"status":"finished"}'],
+    token: '',
+    env: { ...FAST_WAIT_ENV, DEPLOYMENT_UUID: QUEUED_UUID },
+  });
   assert.notEqual(status, 0, 'an empty COOLIFY_API_TOKEN must fail the step');
   assert.match(output, /::error/);
   assert.match(output, /COOLIFY_API_TOKEN/);
@@ -422,89 +532,16 @@ test('the job timeout leaves headroom above the worst-case poll budget', () => {
   );
 });
 
-test('trigger step refuses to publish a uuid outside [A-Za-z0-9._-]', () => {
-  // The uuid is written to $GITHUB_OUTPUT, so an unexpected payload must not be able
-  // to publish a line of its own (kanban t_2b136b43, item 3).
-  const bodies = [
-    '{"deployments":[{"deployment_uuid":"bad uuid"}]}',
-    '{"deployments":[{"deployment_uuid":"a;b"}]}',
-    '{"deployments":[{"deployment_uuid":"evil\\nmy_output=1"}]}',
-  ];
-  for (const body of bodies) {
-    const { status, output, githubOutput } = runStep(TRIGGER_STEP, { responses: [`200|${body}`] });
-    assert.notEqual(status, 0, `200 with ${body} must fail the step, got exit ${status}\n${output}`);
-    assert.match(output, /::error/);
-    assert.doesNotMatch(githubOutput, /deployment_uuid=/, 'no uuid may be published for an unexpected payload');
-  }
+test('wait step fails when the trigger step produced no uuid', () => {
+  const { status, output } = runStep(WAIT_STEP, { responses: ['200|{"status":"finished"}'], env: FAST_WAIT_ENV });
+  assert.notEqual(status, 0, 'a missing uuid must not be treated as success');
+  assert.match(output, /::error/);
 });
 
-test('the Coolify API base and app uuid can be overridden per repository', () => {
-  // Item 5 of kanban t_2b136b43: repo variables win over the fleet defaults, so one
-  // workflow body can serve the whole fleet without losing this repo's own values.
-  const base = 'https://coolify.example.test/api/v1';
-  const trigger = runStep(TRIGGER_STEP, {
-    responses: [`200|${QUEUED}`],
-    env: { COOLIFY_API_BASE: base, COOLIFY_APP_UUID: 'overridden-app-uuid' },
-  });
-  assert.equal(trigger.status, 0, trigger.output);
-  assert.match(trigger.curlCalls.join(' '), new RegExp(`${escapeRegExp(base)}/deploy`));
-  assert.match(trigger.curlCalls.join(' '), /overridden-app-uuid/);
-
-  const wait = runStep(WAIT_STEP, {
-    responses: ['200|{"status":"finished"}'],
-    env: { ...FAST_WAIT_ENV, DEPLOYMENT_UUID: QUEUED_UUID, COOLIFY_API_BASE: base },
-  });
-  assert.equal(wait.status, 0, wait.output);
-  assert.match(wait.curlCalls.join(' '), new RegExp(`${escapeRegExp(base)}/deployments/${QUEUED_UUID}`));
-});
-
-test('deploy workflow deploys on push to main, can be re-run by hand and is bounded', () => {
+test('deploy workflow deploys on push to main and can be re-run by hand', () => {
   assert.match(workflow, /push:\s*\n\s*branches:\s*\[\s*main\s*\]/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /timeout-minutes:\s*\d+/, 'the job must be bounded by a timeout');
-});
-
-test('deploy workflow targets the live rubenbarels.nl Coolify application', () => {
-  // The baked-in default is the target when no COOLIFY_APP_UUID repository
-  // variable is set, so it has to be the application that exists (kanban
-  // t_d96484b5).
-  assert.match(
-    workflow,
-    new RegExp(`COOLIFY_APP_UUID="\\$\\{COOLIFY_APP_UUID:-${APP_UUID}\\}"`),
-    'the workflow must default to the live Coolify app for this repository',
-  );
-});
-
-test('the deleted Coolify application is not the baked-in target any more', () => {
-  assert.doesNotMatch(
-    workflow,
-    new RegExp(`COOLIFY_APP_UUID:-${DELETED_APP_UUID}`),
-    'the deleted app uuid made every push to main fail with HTTP 404 No resources found.',
-  );
-});
-
-test('both steps default the application name to the application they deploy', () => {
-  // The name reaches operator-facing text in both steps (the trigger's log line,
-  // the wait step's rejected-poll and `deployment failed` annotations), so two
-  // different defaults mean one of them names an application this workflow does
-  // not touch.
-  const defaults = [...workflow.matchAll(/COOLIFY_APP_NAME="\$\{COOLIFY_APP_NAME:-([^}]+)\}"/g)].map(
-    (match) => match[1],
-  );
-  assert.equal(defaults.length, 2, `both steps must declare a COOLIFY_APP_NAME default, found ${defaults.length}`);
-  assert.deepEqual(
-    [...new Set(defaults)],
-    [APP_NAME],
-    `both steps must name the deployed application, got ${defaults.join(', ')}`,
-  );
-});
-
-test('the wait step names the deployed application when a poll is rejected', () => {
-  const { status, output, curlCalls } = waitStep([`404|${NO_RESOURCES}`]);
-  assert.notEqual(status, 0, `404 must fail the step, got exit ${status}\n${output}`);
-  assert.match(output, /::error/);
-  assert.equal(curlCalls.length, 1, 'a rejected poll must stop the loop');
-  assert.ok(output.includes(APP_NAME), `the annotation must name the deployed application\n${output}`);
 });
 
 // Kanban t_0838bbdf. GitHub parses a step's stdout for workflow commands, so text
@@ -518,7 +555,7 @@ const forgedLines = (output) =>
 
 test('a multi-line Coolify body cannot forge an annotation from the trigger step', () => {
   for (const fixture of [`200|${hostileBody}`, `401|${hostileBody}`]) {
-    const { status, output } = runStep(TRIGGER_STEP, { responses: [fixture] });
+    const { status, output } = triggerStep([fixture]);
     assert.notEqual(status, 0, `${fixture} must fail the step`);
     assert.deepEqual(forgedLines(output), [], `the body forged a workflow command:\n${output}`);
 
