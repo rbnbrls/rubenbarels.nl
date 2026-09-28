@@ -36,8 +36,8 @@
 # Keys & Tokens → API tokens) stored as a repository secret. It is referenced
 # only through env + ${{ secrets.* }} and never echoed (GitHub masks it anyway).
 #
-# Behaviour is covered by tests/deploy-workflow.test.mjs (`npm test`), which runs
-# these exact `run:` blocks under bash with a stubbed curl.
+# Behaviour is covered by tests/deploy-workflow.test.mjs, which runs these exact
+# `run:` blocks under bash with a stubbed curl.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Deploy to Coolify
